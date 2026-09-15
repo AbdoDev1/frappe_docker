@@ -97,14 +97,12 @@ def get_args_parser():
         action="store_true",
         help="verbose output",  # noqa: E501
     )
-    parser.add_argument(
-        "-a",
-        "--admin-password",
-        action="store",
-        type=str,
-        help="admin password for site, default: admin",  # noqa: E501
-        default="admin",
-    )
+    # NOTE: there is intentionally no --admin-password / --db-root-password
+    # option here. Accepting a password as a CLI argument would write the
+    # plaintext value into shell history and bench.log (bench logs its full
+    # argv verbatim). bench prompts securely via getpass when these flags are
+    # omitted from `bench new-site`, which is how create_site_in_bench() below
+    # invokes it. Requires an interactive TTY.
     parser.add_argument(
         "-d",
         "--db-type",
@@ -204,6 +202,11 @@ def create_site_in_bench(args):
             ["bench", "set-config", "-g", "db_host", "mariadb"],
             cwd=os.getcwd() + "/" + args.bench_name,
         )
+        # NOTE (plaintext-leak hardening): --admin-password and
+        # --db-root-password are intentionally omitted. Passing them as CLI
+        # arguments writes the plaintext values into shell history and
+        # bench.log (bench logs its full argv verbatim). When omitted, bench
+        # prompts securely via getpass (no argv, no log). Requires a TTY.
         new_site_cmd = [
             "bench",
             "new-site",
@@ -211,8 +214,6 @@ def create_site_in_bench(args):
             f"--db-host=mariadb",  # Should match the compose service name
             f"--db-type={args.db_type}",  # Add the selected database type
             f"--mariadb-user-host-login-scope=%",
-            f"--db-root-password=123",  # Replace with your MariaDB password
-            f"--admin-password={args.admin_password}",
         ]
     else:
         cprint("Set db_host", level=3)
@@ -220,14 +221,14 @@ def create_site_in_bench(args):
             ["bench", "set-config", "-g", "db_host", "postgresql"],
             cwd=os.getcwd() + "/" + args.bench_name,
         )
+        # NOTE (plaintext-leak hardening): see mariadb branch above -- password
+        # flags are omitted so bench prompts securely via getpass.
         new_site_cmd = [
             "bench",
             "new-site",
             f"--db-root-username=root",
             f"--db-host=postgresql",  # Should match the compose service name
             f"--db-type={args.db_type}",  # Add the selected database type
-            f"--db-root-password=123",  # Replace with your PostgreSQL password
-            f"--admin-password={args.admin_password}",
         ]
     apps = os.listdir(f"{os.getcwd()}/{args.bench_name}/apps")
     apps.remove("frappe")
@@ -235,6 +236,11 @@ def create_site_in_bench(args):
         new_site_cmd.append(f"--install-app={app}")
     new_site_cmd.append(args.site_name)
     cprint(f"Creating Site {args.site_name} ...", level=2)
+    cprint(
+        "bench will prompt securely for the MariaDB root and Administrator "
+        "passwords (getpass prompts, nothing passed as CLI arguments).",
+        level=3,
+    )
     subprocess.call(
         new_site_cmd,
         cwd=os.getcwd() + "/" + args.bench_name,

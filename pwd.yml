@@ -81,7 +81,17 @@ services:
         if [ -d "sites/frontend" ]; then
           echo "Site frontend already exists, skipping creation";
         else
-          bench new-site --mariadb-user-host-login-scope='%' --admin-password=admin --db-root-username=root --db-root-password=admin --install-app erpnext --set-default frontend;
+          echo "ERROR: refusing to create the site with passwords passed as bench CLI arguments.";
+          echo "bench logs its full argv verbatim into bench.log, and the shell logs the full";
+          echo "command into history, so --admin-password/--db-root-password as CLI arguments";
+          echo "leak the plaintext values. This bench version offers no stdin/file/env based";
+          echo "alternative for these flags in an unattended container (omitting them falls back";
+          echo "to an interactive getpass prompt, which needs a TTY).";
+          echo "Create the site interactively instead:";
+          echo "  docker compose -f pwd.yml run --rm --entrypoint bash create-site";
+          echo "  bench new-site --mariadb-user-host-login-scope='%' --db-root-username=root --install-app erpnext --set-default frontend";
+          echo "(omit --admin-password and --db-root-password so bench prompts for them securely via getpass; never pass them as arguments)";
+          exit 1;
         fi;
 
   db:

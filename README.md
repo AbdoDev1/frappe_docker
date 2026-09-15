@@ -98,7 +98,36 @@ Then run:
 docker compose -f pwd.yml up -d
 ```
 
-Wait for a couple of minutes for ERPNext site to be created or check `create-site` container logs before opening browser on port `8080`. (username: `Administrator`, password: `admin`)
+The `create-site` service intentionally does **not** create the site on its own:
+passing `--admin-password`/`--db-root-password` as CLI arguments would leak the
+plaintext values into shell history and `bench.log`. Create the site
+interactively instead (bench prompts securely via `getpass` when the password
+flags are omitted):
+
+```sh
+docker compose -f pwd.yml run --rm --entrypoint bash create-site
+bench new-site --mariadb-user-host-login-scope='%' --db-root-username=root --install-app erpnext --set-default frontend
+```
+
+Then open the browser on port `8080` and log in with the `Administrator`
+password chosen at the prompt.
+
+> **Handling passwords safely**
+>
+> Never pass a password as a `bench` CLI argument (e.g. `--admin-password=...`,
+> `set-password <user> <password>`): bench logs its full `argv` verbatim into
+> `bench.log`, and the shell logs the full command into history, so the
+> plaintext value leaks into both places. Omit the password flag instead and
+> bench prompts securely via `getpass` (nothing on the command line).
+> Optionally, zsh operators can exclude space-prefixed commands from history:
+>
+> ```sh
+> source scripts/enable-zsh-hardening.zsh
+> # or, in each open session: setopt HIST_IGNORE_SPACE
+> ```
+>
+> Note this protects shell history only — not `bench.log`. The only reliable
+> protection for `bench.log` is to never put the secret on the command line.
 
 ## Contributing
 
