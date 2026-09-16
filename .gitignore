@@ -32,3 +32,6 @@ node_modules
 # VitePress
 **/.vitepress/dist
 **/.vitepress/cache
+
+# Local Biozone work files (kept out of this repo)
+biozone_mg_erpnext_plan.md
