@@ -1,10 +1,15 @@
 ARG FRAPPE_BRANCH=version-16
 ARG FRAPPE_IMAGE_PREFIX=frappe
+ARG FRAPPE_BUILD_IMAGE_DIGEST=""
+ARG FRAPPE_BASE_IMAGE_DIGEST=""
 
-FROM ${FRAPPE_IMAGE_PREFIX}/build:${FRAPPE_BRANCH} AS builder
+FROM ${FRAPPE_IMAGE_PREFIX}/build:${FRAPPE_BRANCH}${FRAPPE_BUILD_IMAGE_DIGEST} AS builder
 
 ARG FRAPPE_BRANCH=version-16
 ARG FRAPPE_PATH=https://github.com/frappe/frappe
+ARG FRAPPE_REF=v16.35.0
+ARG FRAPPE_SHA=012667b9c4e7f66d5e1ff5858d2e922331d4300a
+ARG ERPNEXT_SHA=b30aa5334bcea94dba74f5b866af13c43a861948
 ARG CACHE_BUST=""
 
 USER frappe
@@ -16,7 +21,7 @@ RUN --mount=type=secret,id=apps_json,target=/opt/frappe/apps.json,uid=1000,gid=1
     export APP_INSTALL_ARGS="--apps_path=/opt/frappe/apps.json"; \
   fi && \
   bench init ${APP_INSTALL_ARGS}\
-    --frappe-branch=${FRAPPE_BRANCH} \
+    --frappe-branch=${FRAPPE_REF} \
     --frappe-path=${FRAPPE_PATH} \
     --no-procfile \
     --no-backups \
@@ -24,16 +29,33 @@ RUN --mount=type=secret,id=apps_json,target=/opt/frappe/apps.json,uid=1000,gid=1
     --verbose \
     /home/frappe/frappe-bench && \
   cd /home/frappe/frappe-bench && \
+  test "$(git -C apps/frappe rev-parse HEAD)" = "${FRAPPE_SHA}" || \
+    { echo "FRAPPE_SHA mismatch: expected ${FRAPPE_SHA} got $(git -C apps/frappe rev-parse HEAD)"; exit 1; } && \
+  test "$(git -C apps/erpnext rev-parse HEAD)" = "${ERPNEXT_SHA}" || \
+    { echo "ERPNEXT_SHA mismatch: expected ${ERPNEXT_SHA} got $(git -C apps/erpnext rev-parse HEAD)"; exit 1; } && \
+  found=0; : > /home/frappe/frappe-bench/BUILD-SHAs && \
+  for d in apps/*/; do \
+    if [ -d "$d/.git" ]; then \
+      echo "$(basename $d)=$(git -C $d rev-parse HEAD)" >> /home/frappe/frappe-bench/BUILD-SHAs; \
+      found=1; \
+    fi; \
+  done && \
+  test "$found" = "1" || { echo "no .git directories under apps/ — refusing build"; exit 1; } && \
   echo "{}" > sites/common_site_config.json && \
   find apps -mindepth 1 -path "*/.git" | xargs rm -fr
 
-FROM ${FRAPPE_IMAGE_PREFIX}/base:${FRAPPE_BRANCH} AS backend
+FROM ${FRAPPE_IMAGE_PREFIX}/base:${FRAPPE_BRANCH}${FRAPPE_BASE_IMAGE_DIGEST} AS backend
 
 USER frappe
 
 COPY --from=builder --chown=frappe:frappe /home/frappe/frappe-bench /home/frappe/frappe-bench
 
 WORKDIR /home/frappe/frappe-bench
+
+ARG CACHE_BUST=""
+ARG FRAPPE_SHA=012667b9c4e7f66d5e1ff5858d2e922331d4300a
+ARG ERPNEXT_SHA=b30aa5334bcea94dba74f5b866af13c43a861948
+LABEL biozone.frappe-sha="${FRAPPE_SHA}" biozone.erpnext-sha="${ERPNEXT_SHA}" biozone.cache-bust="${CACHE_BUST}"
 
 # Move assets to image-layer storage
 RUN cp -r /home/frappe/frappe-bench/sites/assets /home/frappe/frappe-bench/assets && \
