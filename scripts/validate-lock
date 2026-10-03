@@ -1,0 +1,238 @@
+#!/usr/bin/env python3
+"""validate-lock: offline structural validator for upstream.lock.
+
+Checks (read-only, no network, no writes):
+  - schema == 1 and required sections/keys exist
+  - every source has repo + ref (sole legal field, non-empty) + full 40-hex SHA
+  - pinned is a real Boolean; absence is a structural error
+  - pinned:false inside the production set is a POLICY-VIOLATION (failure)
+  - required ARG declarations exist in the Containerfile (defaults NOT required)
+  - recorded Dockerfile sha256 matches the working tree (failure on mismatch)
+  - yarn.lock state is dev-only: mismatch/absence warns, never fails alone
+  - no secrets embedded (password/token/secret/private_key keys)
+  - base-image digests present or explicitly pending (warning, not failure)
+
+Usage: scripts/validate-lock --apps-json PATH
+  --apps-json PATH: same input build.sh uses; derives the production set.
+  Required: without it the production policy cannot be proven.
+
+Exit 0: valid (warnings allowed, printed). Exit 1: invalid (errors printed).
+"""
+
+import hashlib
+import json
+import re
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+LOCK_PATH = REPO_ROOT / "upstream.lock"
+CONTAINERFILE_PATH = REPO_ROOT / "images" / "layered" / "Containerfile"
+HEX40 = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
+SECRET_HINT = re.compile(r"password|passwd|token|secret|private_key|api_key", re.IGNORECASE)
+REQUIRED_ARGS = ("FRAPPE_REF", "FRAPPE_SHA", "ERPNEXT_REF", "ERPNEXT_SHA")
+BASE_PRODUCTION = ("frappe", "erpnext")
+
+
+def parse_args(argv: list):
+    """Strict CLI parsing. --apps-json PATH is required.
+
+    Returns (apps_json_path, exit_code_or_None). Rejects unknown args,
+    duplicates, dash-leading values, and trailing positionals.
+    """
+    args = list(argv[1:])
+    if args.count("--apps-json") != 1:
+        return None, 2
+    i = args.index("--apps-json")
+    if i + 1 >= len(args) or args[i + 1].startswith("-"):
+        return None, 2
+    if len(args) != 2:
+        return None, 2
+    return args[i + 1], None
+
+
+def app_names_from_apps_json(path: str):
+    """Derive app names from an apps.json input (list or dict form).
+
+    Strict: unreadable files, invalid JSON, non-object values, invalid
+    elements, and bad names are all errors — nothing is silently dropped.
+    Returns (names_set_or_None, error_or_None). Never writes anything.
+    """
+    try:
+        raw = Path(path).read_text(encoding="utf-8")
+    except Exception as exc:
+        return None, f"apps.json unreadable: {path}: {exc}"
+    try:
+        data = json.loads(raw)
+    except Exception as exc:
+        return None, f"apps.json invalid JSON: {path}: {exc}"
+    names = set()
+    if isinstance(data, dict):
+        for k, v in data.items():
+            if not isinstance(k, str) or not re.match(r"^[A-Za-z0-9_.-]+$", k):
+                return None, f"apps.json: invalid app name key: {k!r}"
+            if not isinstance(v, dict):
+                return None, f"apps.json: value for {k!r} must be an object"
+            names.add(k)
+    elif isinstance(data, list):
+        for entry in data:
+            if not isinstance(entry, dict):
+                return None, "apps.json: list entries must be objects"
+            url = entry.get("url", "")
+            if not isinstance(url, str) or not url:
+                return None, "apps.json: list entry missing url"
+            base = url.rstrip("/").rsplit("/", 1)[-1]
+            if base.endswith(".git"):
+                base = base[:-4]
+            if not re.match(r"^[A-Za-z0-9_.-]+$", base):
+                return None, f"apps.json: invalid app name from url: {url!r}"
+            names.add(base)
+    else:
+        return None, f"apps.json unsupported top-level type: {type(data).__name__}"
+    return names, None
+
+
+def sha256_of(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def main(argv: list) -> int:
+    errors, warnings = [], []
+
+    apps_json_path, arg_exit = parse_args(argv)
+    if arg_exit is not None:
+        print("ERROR: usage: scripts/validate-lock --apps-json PATH (required, no extras)")
+        return arg_exit
+
+    names, apps_err = app_names_from_apps_json(apps_json_path)
+    if apps_err is not None:
+        errors.append(apps_err)
+        production_set = set(BASE_PRODUCTION)
+    else:
+        production_set = set(BASE_PRODUCTION) | set(names)
+
+    try:
+        lock = json.loads(LOCK_PATH.read_text(encoding="utf-8"))
+    except Exception as exc:
+        print(f"ERROR: cannot read {LOCK_PATH}: {exc}")
+        return 1
+
+    if lock.get("schema") != 1:
+        errors.append(f"schema must be 1, got {lock.get('schema')!r}")
+
+    sources = lock.get("sources")
+    if not isinstance(sources, dict) or not sources:
+        errors.append("sources must be a non-empty object")
+        sources = {}
+
+    for name, spec in sources.items():
+        if not isinstance(spec, dict):
+            errors.append(f"sources.{name}: must be an object")
+            continue
+        if not spec.get("repo"):
+            errors.append(f"sources.{name}: missing repo")
+        if "tag" in spec:
+            errors.append(f"sources.{name}: tag is not allowed; use ref")
+        ref = spec.get("ref", "")
+        if not (isinstance(ref, str) and ref.strip()):
+            errors.append(f"sources.{name}: ref must be a non-empty string (sole legal field)")
+        sha = spec.get("sha", "")
+        if not (isinstance(sha, str) and HEX40.fullmatch(sha)):
+            errors.append(f"sources.{name}: sha must be full 40-hex, got {sha!r}")
+        if "pinned" not in spec:
+            errors.append(f"sources.{name}: pinned: missing (structural error)")
+        elif not isinstance(spec.get("pinned"), bool):
+            errors.append(f"sources.{name}: pinned must be a real Boolean")
+        elif production_set is not None:
+            if name in production_set and spec.get("pinned") is False:
+                errors.append(f"sources.{name}: POLICY-VIOLATION (production source must be pinned:true)")
+            if name not in production_set:
+                warnings.append(f"sources.{name}: outside production set (separate policy required)")
+
+    # Level 1 (declarations only): the final design carries no defaults,
+    # so presence of the declaration is what is checked — never the value.
+    try:
+        cf_text = CONTAINERFILE_PATH.read_text(encoding="utf-8")
+    except Exception as exc:
+        errors.append(f"Containerfile unreadable: {CONTAINERFILE_PATH}: {exc}")
+        cf_text = ""
+    if cf_text:
+        declared = set()
+        for line in cf_text.splitlines():
+            line = line.strip()
+            for key in REQUIRED_ARGS:
+                if line == f"ARG {key}" or line.startswith(f"ARG {key}="):
+                    declared.add(key)
+        for key in REQUIRED_ARGS:
+            if key not in declared:
+                errors.append(f"Containerfile: required declaration ARG {key} absent")
+
+    build = lock.get("build", {})
+    for key in ("dockerfile_sha256", "dockerfile_path"):
+        if key not in build:
+            errors.append(f"build.{key}: missing")
+    for key in ("yarn_lock_sha256", "yarn_lock_path"):
+        if key not in build:
+            warnings.append(f"build.{key}: missing (dev-only state)")
+
+    rel = build.get("dockerfile_path")
+    want = build.get("dockerfile_sha256")
+    if rel and want:
+        target = REPO_ROOT / rel
+        if not target.is_file():
+            errors.append(f"{rel}: file absent locally, hash not rechecked")
+        else:
+            try:
+                actual = sha256_of(target)
+            except Exception as exc:
+                errors.append(f"{rel}: unreadable ({exc})")
+            else:
+                if actual != want:
+                    errors.append(f"{rel}: sha256 mismatch (file changed since lock)")
+
+    # yarn state is dev-only: visible, never failing alone.
+    yrel = build.get("yarn_lock_path")
+    ywant = build.get("yarn_lock_sha256")
+    if yrel and ywant:
+        ytarget = REPO_ROOT / yrel
+        if not ytarget.is_file():
+            warnings.append(f"{yrel}: file absent locally (dev-only state)")
+        else:
+            try:
+                if sha256_of(ytarget) != ywant:
+                    warnings.append(f"{yrel}: dev-only state differs from lock (not a build input)")
+            except Exception as exc:
+                errors.append(f"{yrel}: unreadable ({exc})")
+
+    for img_key in ("frappe_build", "frappe_base"):
+        digest = (build.get("base_images", {}) or {}).get(img_key, {}).get("digest")
+        if not digest:
+            warnings.append(f"base_images.{img_key}.digest: not yet captured (record at next build)")
+
+    blob = json.dumps(lock)
+    if SECRET_HINT.search(blob):
+        # allow the explanatory note; flag only real secret-looking keys
+        for m in SECRET_HINT.finditer(blob):
+            ctx = blob[max(0, m.start() - 40):m.end() + 40]
+            if "note" not in ctx.lower() and "warning" not in ctx.lower():
+                errors.append(f"possible secret material near: ...{ctx}...")
+                break
+
+    for w in warnings:
+        print(f"WARNING: {w}")
+    for e in errors:
+        print(f"ERROR: {e}")
+
+    if errors:
+        print(f"INVALID: {len(errors)} error(s)")
+        return 1
+    print(f"VALID: {len(sources)} sources checked")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

@@ -1,0 +1,191 @@
+#!/usr/bin/env python3
+"""sync-from-lock --check: read-only drift reporter.
+
+Compares upstream.lock SHAs against local dev checkouts and reports:
+  current version, wanted version, diffs, what would change.
+Makes NO changes: no checkout, no fetch, no writes. Any --apply usage
+is refused. Reads local git repos only. Git subprocesses run with
+GIT_OPTIONAL_LOCKS=0 so the index is never touched.
+
+Usage: scripts/sync-from-lock --check --apps-json PATH
+  --apps-json PATH: same input build.sh uses; derives the production set
+  (frappe + erpnext + apps found in the file). Required: without it the
+  production policy cannot be proven. pinned:false inside the production
+  set is a POLICY-VIOLATION. Pinned sources are drift-checked wherever
+  they live. Sources outside it are informational.
+
+Exit 0: no drift. Exit 1: drift, policy violation, or check error.
+Exit 2: usage error.
+"""
+
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+LOCK_PATH = REPO_ROOT / "upstream.lock"
+APPS_DIR = REPO_ROOT / "development" / "frappe-bench" / "apps"
+GIT_ENV = {**os.environ, "GIT_OPTIONAL_LOCKS": "0"}
+BASE_PRODUCTION = ("frappe", "erpnext")
+HEX40 = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
+
+
+def git_head(path: Path) -> str:
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=path,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=GIT_ENV,
+        )
+    except Exception as exc:
+        return f"<unreadable: {exc}>"
+    if out.returncode != 0:
+        return "<no-repo>"
+    return out.stdout.strip()
+
+
+def git_dirty(path: Path) -> bool:
+    try:
+        out = subprocess.run(
+            ["git", "status", "--short"],
+            cwd=path,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=GIT_ENV,
+        )
+    except Exception:
+        return True
+    return bool(out.stdout.strip())
+
+
+def app_names_from_apps_json(path: str):
+    """Derive app names from an apps.json input (list or dict form).
+
+    Strict: unreadable files, invalid JSON, non-object values, invalid
+    elements, and bad names are all errors — nothing is silently dropped.
+    Returns (names_set_or_None, error_or_None). Never writes anything.
+    """
+    try:
+        raw = Path(path).read_text(encoding="utf-8")
+    except Exception as exc:
+        return None, f"apps.json unreadable: {path}: {exc}"
+    try:
+        data = json.loads(raw)
+    except Exception as exc:
+        return None, f"apps.json invalid JSON: {path}: {exc}"
+    names = set()
+    if isinstance(data, dict):
+        for k, v in data.items():
+            if not isinstance(k, str) or not re.match(r"^[A-Za-z0-9_.-]+$", k):
+                return None, f"apps.json: invalid app name key: {k!r}"
+            if not isinstance(v, dict):
+                return None, f"apps.json: value for {k!r} must be an object"
+            names.add(k)
+    elif isinstance(data, list):
+        for entry in data:
+            if not isinstance(entry, dict):
+                return None, "apps.json: list entries must be objects"
+            url = entry.get("url", "")
+            if not isinstance(url, str) or not url:
+                return None, "apps.json: list entry missing url"
+            base = url.rstrip("/").rsplit("/", 1)[-1]
+            if base.endswith(".git"):
+                base = base[:-4]
+            if not re.match(r"^[A-Za-z0-9_.-]+$", base):
+                return None, f"apps.json: invalid app name from url: {url!r}"
+            names.add(base)
+    else:
+        return None, f"apps.json unsupported top-level type: {type(data).__name__}"
+    return names, None
+
+
+def main(argv: list) -> int:
+    argv1 = argv[1:]
+    if "--apply" in argv1:
+        print("refused: --apply not implemented (read-only reporter)")
+        return 2
+    if not argv1 or argv1[0] != "--check":
+        print("usage: scripts/sync-from-lock --check --apps-json PATH (--apply refused)")
+        return 2
+    rest = argv1[1:]
+    if rest.count("--apps-json") != 1:
+        print("usage: scripts/sync-from-lock --check --apps-json PATH (--apply refused)")
+        return 2
+    i = rest.index("--apps-json")
+    if i + 1 >= len(rest) or rest[i + 1].startswith("-"):
+        print("usage: scripts/sync-from-lock --check --apps-json PATH (--apply refused)")
+        return 2
+    if len(rest) != 2:
+        print("usage: scripts/sync-from-lock --check --apps-json PATH (no extras)")
+        return 2
+    apps_json_path = rest[i + 1]
+
+    names, apps_err = app_names_from_apps_json(apps_json_path)
+    if apps_err is not None:
+        print(f"ERROR: {apps_err}")
+        return 1
+    production_set = set(BASE_PRODUCTION) | set(names)
+
+    try:
+        lock = json.loads(LOCK_PATH.read_text(encoding="utf-8"))
+    except Exception as exc:
+        print(f"ERROR: cannot read {LOCK_PATH}: {exc}")
+        return 1
+
+    if lock.get("schema") != 1:
+        print("ERROR: unsupported lock schema")
+        return 1
+
+    print(f"{'source':<14}{'wanted':<42}{'current':<42}status")
+    drifts = 0
+    for name, spec in lock.get("sources", {}).items():
+        want = spec.get("sha", "?")
+        have = git_head(APPS_DIR / name)
+        pinned = spec.get("pinned", None)
+        if "tag" in spec:
+            status = "SCHEMA-ERROR (tag is not allowed; use ref)"
+            drifts += 1
+        elif pinned is None:
+            status = "SCHEMA-ERROR (pinned missing)"
+            drifts += 1
+        elif not isinstance(pinned, bool):
+            status = "SCHEMA-ERROR (pinned must be Boolean)"
+            drifts += 1
+        elif pinned is True:
+            ref = spec.get("ref", "")
+            if not (isinstance(ref, str) and ref.strip()):
+                status = "SCHEMA-ERROR (ref missing or empty)"
+                drifts += 1
+            elif not (isinstance(want, str) and HEX40.fullmatch(want)):
+                status = "SCHEMA-ERROR (sha must be full 40-hex)"
+                drifts += 1
+            elif have.startswith("<"):
+                status = "CHECK-ERROR (local repository unreadable)"
+                drifts += 1
+            elif have == want:
+                status = "MATCH"
+            else:
+                status = "DRIFT (would checkout " + want[:8] + ")"
+                drifts += 1
+        elif name in production_set:
+            status = "POLICY-VIOLATION (production source must be pinned:true)"
+            drifts += 1
+        else:
+            status = "RECORDED-MOVABLE (informational, outside production set)"
+        dirty = " [DIRTY-WORKTREE]" if git_dirty(APPS_DIR / name) else ""
+        ref = spec.get("ref", "?")
+        print(f"{name:<14}{want[:12]:<42}{have[:12]:<42}{status} [{ref}]{dirty}")
+
+    print(f"---\ndrifted-or-violated: {drifts} (--apply refused; no changes made)")
+    return 1 if drifts else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

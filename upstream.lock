@@ -1,0 +1,58 @@
+{
+  "schema": 1,
+  "sources": {
+    "frappe": {
+      "repo": "https://github.com/frappe/frappe",
+      "ref": "v16.36.0",
+      "sha": "f3f0c0b13c77a419487150a198fed42964e1919e",
+      "pinned": true
+    },
+    "erpnext": {
+      "repo": "https://github.com/frappe/erpnext",
+      "ref": "v16.36.1",
+      "sha": "fb78e58b8c037bcff4f90b7361ad81ff7b1c42ba",
+      "pinned": true
+    },
+    "mg_companey": {
+      "repo": "https://github.com/AbdoDev1/mg_companey.git",
+      "ref": "version-16",
+      "sha": "b103fac40b64a95a44f3a7ec7f080b0b2346389e",
+      "pinned": true
+    },
+    "biozone_ext": {
+      "repo": "https://github.com/AbdoDev1/biozone_ext.git",
+      "ref": "version-16",
+      "sha": "7e2e01e4862cbfcda2f47d0e940314db36acfad8",
+      "pinned": true
+    },
+    "biozone_web": {
+      "repo": "https://github.com/AbdoDev1/biozone_web.git",
+      "ref": "version-16",
+      "sha": "477b439d08aa177136febaba7f3762bf7ef72569",
+      "pinned": true
+    },
+    "mg_ext": {
+      "repo": "https://github.com/AbdoDev1/mg_ext.git",
+      "ref": "version-16",
+      "sha": "006b133f032d67cdaac27677e8191f821c488bf0",
+      "pinned": true
+    }
+  },
+  "build": {
+    "base_images": {
+      "note": "Digests not yet captured — record at next build (docker images --digests). Null is a warning, not a failure.",
+      "frappe_build": {
+        "ref": "frappe/build:version-16",
+        "digest": null
+      },
+      "frappe_base": {
+        "ref": "frappe/base:version-16",
+        "digest": null
+      }
+    },
+    "yarn_lock_sha256": "267d9f2306b991e414608760b78929512f4b98ac14be9880e28aac5eac958433",
+    "yarn_lock_path": "development/frappe-bench/apps/erpnext/banking/yarn.lock",
+    "dockerfile_sha256": "9ea79738d834d4ffd5cca1f60615f0fab7af44c2433ffaddf00b32b61f8cbe4c",
+    "dockerfile_path": "images/layered/Containerfile"
+  }
+}
