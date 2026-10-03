@@ -7,9 +7,9 @@ FROM ${FRAPPE_IMAGE_PREFIX}/build:${FRAPPE_BRANCH}${FRAPPE_BUILD_IMAGE_DIGEST} A
 
 ARG FRAPPE_BRANCH=version-16
 ARG FRAPPE_PATH=https://github.com/frappe/frappe
-ARG FRAPPE_REF=v16.35.0
-ARG FRAPPE_SHA=012667b9c4e7f66d5e1ff5858d2e922331d4300a
-ARG ERPNEXT_SHA=b30aa5334bcea94dba74f5b866af13c43a861948
+ARG FRAPPE_REF=v16.36.0
+ARG FRAPPE_SHA=f3f0c0b13c77a419487150a198fed42964e1919e
+ARG ERPNEXT_SHA=fb78e58b8c037bcff4f90b7361ad81ff7b1c42ba
 ARG CACHE_BUST=""
 
 USER frappe
@@ -53,8 +53,8 @@ COPY --from=builder --chown=frappe:frappe /home/frappe/frappe-bench /home/frappe
 WORKDIR /home/frappe/frappe-bench
 
 ARG CACHE_BUST=""
-ARG FRAPPE_SHA=012667b9c4e7f66d5e1ff5858d2e922331d4300a
-ARG ERPNEXT_SHA=b30aa5334bcea94dba74f5b866af13c43a861948
+ARG FRAPPE_SHA=f3f0c0b13c77a419487150a198fed42964e1919e
+ARG ERPNEXT_SHA=fb78e58b8c037bcff4f90b7361ad81ff7b1c42ba
 LABEL biozone.frappe-sha="${FRAPPE_SHA}" biozone.erpnext-sha="${ERPNEXT_SHA}" biozone.cache-bust="${CACHE_BUST}"
 
 # Move assets to image-layer storage
