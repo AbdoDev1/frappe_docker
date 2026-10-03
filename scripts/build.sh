@@ -103,11 +103,9 @@ except Exception as exc:
     fail(f"apps.json unreadable: {apps_path}: {exc}")
 
 names = []
+urls = {}
 if isinstance(data, dict):
-    for k, v in data.items():
-        if not isinstance(k, str) or not NAME_RE.match(k) or not isinstance(v, dict):
-            fail(f"apps.json: invalid entry: {k!r}")
-        names.append(k)
+    fail("apps.json: dict form carries no urls; list form with url per app is required")
 elif isinstance(data, list):
     for entry in data:
         if not isinstance(entry, dict):
@@ -121,6 +119,7 @@ elif isinstance(data, list):
         if not NAME_RE.match(base):
             fail(f"apps.json: invalid app name from url: {url!r}")
         names.append(base)
+        urls[base] = url
 else:
     fail("apps.json: unsupported top-level type")
 if sorted(set(names)) == [] or len(set(names)) != len(names):
@@ -129,6 +128,20 @@ if sorted(set(names)) == [] or len(set(names)) != len(names):
 custom_lock = [n for n in sources if n not in ("frappe", "erpnext")]
 if sorted(set(names) - {"frappe", "erpnext"}) != sorted(custom_lock):
     fail(f"apps.json/lock name mismatch: apps={sorted(set(names))} lock-custom={sorted(custom_lock)}")
+
+def norm_url(u):
+    u = u.rstrip("/")
+    if u.endswith(".git"):
+        u = u[:-4]
+    return u
+
+# URL cross-check: exact equality after limited normalization (trailing
+# slash + trailing .git). Dict-form inputs are refused above, so every
+# accepted app necessarily carries a url — no unchecked path remains.
+for n in names:
+    if n in urls and n in sources:
+        if norm_url(urls[n]) != norm_url(sources[n]["repo"]):
+            fail(f"repo/url mismatch for {n}: apps.json={urls[n]!r} lock={sources[n]['repo']!r}")
 
 def kind_of(ref):
     return "tag" if TAG_RE.match(ref) else "branch"
