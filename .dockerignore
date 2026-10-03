@@ -2,3 +2,12 @@ README.md
 LICENSE
 .gitignore
 compose*.yaml
+# Build context hygiene (approved 2026-10-03): keep only build inputs.
+# Verified: Containerfile COPYs resources/core/*.sh only; no .md/.xlsx/.pdf/logs needed.
+.git/
+.opencode/
+logs/
+*.md
+*.xlsx
+*.pdf
+AGENTS.md
