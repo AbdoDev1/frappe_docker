@@ -28,7 +28,7 @@
     "biozone_web": {
       "repo": "https://github.com/AbdoDev1/biozone_web.git",
       "ref": "version-16",
-      "sha": "0ab453ab2645504df71cd5313580051f49a45d8b",
+      "sha": "3043fadae3ff3f75e749d44e738ece7b16a11d2f",
       "pinned": true
     },
     "mg_ext": {
@@ -52,7 +52,7 @@
     },
     "yarn_lock_sha256": "267d9f2306b991e414608760b78929512f4b98ac14be9880e28aac5eac958433",
     "yarn_lock_path": "development/frappe-bench/apps/erpnext/banking/yarn.lock",
-    "dockerfile_sha256": "4ca6aa7c97526b1dc88909e4f51c23f7344ffb7ac61a33f1a3fce96451dcfae8",
+    "dockerfile_sha256": "11e2930975ee20000e53d7e5a6cf56de38f4a32664b55b90f695fbd6189707db",
     "dockerfile_path": "images/layered/Containerfile"
   }
 }
