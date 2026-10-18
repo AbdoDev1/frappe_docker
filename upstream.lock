@@ -28,7 +28,7 @@
     "biozone_web": {
       "repo": "https://github.com/AbdoDev1/biozone_web.git",
       "ref": "version-16",
-      "sha": "f622a6adda43980259a3af4efb7e1626239793c6",
+      "sha": "15d15d6e339f61b3ce6ef19d06731a8b1dac4a0e",
       "pinned": true
     },
     "mg_ext": {
