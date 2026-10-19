@@ -47,6 +47,7 @@ services:
     <<: *backend_defaults
     platform: linux/amd64
     environment:
+      USE_PROXY: ${USE_PROXY:-}
       GUNICORN_THREADS: ${GUNICORN_THREADS:-4}
       GUNICORN_WORKERS: ${GUNICORN_WORKERS:-2}
       GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT:-120}
