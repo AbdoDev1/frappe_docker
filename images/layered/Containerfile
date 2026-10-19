@@ -37,10 +37,6 @@ RUN --mount=type=secret,id=apps_json,target=/opt/frappe/apps.json,uid=1000,gid=1
     --verbose \
     /home/frappe/frappe-bench && \
   cd /home/frappe/frappe-bench && \
-  test "$(git -C apps/frappe rev-parse HEAD)" = "${FRAPPE_SHA}" || \
-    { echo "FRAPPE_SHA mismatch: expected ${FRAPPE_SHA} got $(git -C apps/frappe rev-parse HEAD)"; exit 1; } && \
-  test "$(git -C apps/erpnext rev-parse HEAD)" = "${ERPNEXT_SHA}" || \
-    { echo "ERPNEXT_SHA mismatch: expected ${ERPNEXT_SHA} got $(git -C apps/erpnext rev-parse HEAD)"; exit 1; } && \
   pinned_count=0; while read -r name url sha kind ref; do \
     [ -n "$name" ] || continue; \
     remote="$(git -C "apps/$name" remote)" || exit 1; \
@@ -61,6 +57,10 @@ RUN --mount=type=secret,id=apps_json,target=/opt/frappe/apps.json,uid=1000,gid=1
   done < /tmp/pins.list && \
   echo "pinned_count=$pinned_count" && \
   test "$pinned_count" = "6" || { echo "pinned $pinned_count apps, expected 6"; exit 1; } && \
+  test "$(git -C apps/frappe rev-parse HEAD)" = "${FRAPPE_SHA}" || \
+    { echo "FRAPPE_SHA mismatch: expected ${FRAPPE_SHA} got $(git -C apps/frappe rev-parse HEAD)"; exit 1; } && \
+  test "$(git -C apps/erpnext rev-parse HEAD)" = "${ERPNEXT_SHA}" || \
+    { echo "ERPNEXT_SHA mismatch: expected ${ERPNEXT_SHA} got $(git -C apps/erpnext rev-parse HEAD)"; exit 1; } && \
   found=0; : > /home/frappe/frappe-bench/BUILD-SHAs && \
   for d in apps/*/; do \
     if [ -d "$d/.git" ]; then \
