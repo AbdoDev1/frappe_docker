@@ -173,6 +173,56 @@ PYEOF
 )"
 eval "$RESOLVED"
 
+# --- upstream drift pre-gate: every lock ref must still resolve to its
+# pinned SHA (tags incl. annotated peeling, branches by head). Fails in
+# seconds, before Docker. Reachability alone never counts as a match.
+python3 - "$LOCK_FILE" <<'PYEOF' || { echo "ERROR: upstream drift pre-gate failed — update lock, do not build" >&2; exit 1; }
+import json, re, subprocess, sys
+lock = json.load(open(sys.argv[1], encoding="utf-8"))
+TAG_RE = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+$")
+ok = True
+for name, spec in lock["sources"].items():
+    ref, want = spec["ref"], spec["sha"]
+    is_tag = bool(TAG_RE.match(ref))
+    # Annotated tags need an explicit ^{} query: a plain tag pattern only
+    # returns the tag object, never the peeled commit. Lightweight tags
+    # have no ^{} line, so fall back to the plain ref.
+    pats = [f"refs/tags/{ref}^{{}}", f"refs/tags/{ref}"] if is_tag else [f"refs/heads/{ref}"]
+    got = None
+    reachable = False
+    for pat in pats:
+        try:
+            p = subprocess.run(["git", "ls-remote", spec["repo"], pat],
+                               capture_output=True, text=True, timeout=90)
+        except Exception as exc:
+            print(f"ERROR: preflight: ls-remote error for {name}: {exc}")
+            ok = False
+            break
+        if p.returncode != 0:
+            continue
+        reachable = True
+        for line in p.stdout.splitlines():
+            parts = line.split()
+            if len(parts) >= 2 and parts[1] == pat:
+                got = parts[0]
+                break
+        if got is not None:
+            break
+    if not reachable:
+        print(f"ERROR: preflight: ls-remote failed for {name} ({spec['repo']})")
+        ok = False
+        continue
+    if got is None:
+        print(f"ERROR: preflight: ref {pat} not found for {name}")
+        ok = False
+    elif got.lower() != want.lower():
+        print(f"ERROR: preflight drift: {name} {ref} resolves to {got}, lock wants {want}")
+        ok = False
+    else:
+        print(f"preflight ok: {name} {ref} == {want[:8]}")
+sys.exit(0 if ok else 1)
+PYEOF
+
 # --- pre-flight guards (fail fast, before Docker) ---
 [ -n "${FRAPPE_BUILD_IMAGE:-}" ] || { echo "missing FRAPPE_BUILD_IMAGE" >&2; exit 1; }
 [ -n "${FRAPPE_BASE_IMAGE:-}" ] || { echo "missing FRAPPE_BASE_IMAGE" >&2; exit 1; }

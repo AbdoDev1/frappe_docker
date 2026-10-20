@@ -35,3 +35,13 @@ node_modules
 
 # Local Biozone work files (kept out of this repo)
 biozone_mg_erpnext_plan.md
+HISTORY.md
+archive/
+biozone_server_deploy_log.md
+
+# Local working files
+*.xlsx
+*.pdf
+*.jpg
+*.jpeg
+picking-print-previews/
