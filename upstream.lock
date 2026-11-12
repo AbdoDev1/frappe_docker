@@ -52,7 +52,7 @@
     },
     "yarn_lock_sha256": "267d9f2306b991e414608760b78929512f4b98ac14be9880e28aac5eac958433",
     "yarn_lock_path": "development/frappe-bench/apps/erpnext/banking/yarn.lock",
-    "dockerfile_sha256": "11e2930975ee20000e53d7e5a6cf56de38f4a32664b55b90f695fbd6189707db",
+    "dockerfile_sha256": "d529697def329e4620e162e1a12eac73056e240fdc74c692ecf9fde59844d12e",
     "dockerfile_path": "images/layered/Containerfile"
   }
 }

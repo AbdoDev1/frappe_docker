@@ -49,7 +49,9 @@ RUN --mount=type=secret,id=apps_json,target=/opt/frappe/apps.json,uid=1000,gid=1
     else git -C "apps/$name" fetch --no-tags "$remote" "refs/heads/$ref:refs/remotes/$remote/$ref" || exit 1; \
     fetched_sha="$(git -C "apps/$name" rev-parse "refs/remotes/$remote/$ref^{commit}")" || exit 1; fi; \
     test "$fetched_sha" = "$sha" || { echo "$name ref/SHA mismatch: ref $ref resolves to $fetched_sha, wanted $sha"; exit 1; }; \
-    if git -C "apps/$name" rev-parse --is-shallow-repository | grep -q true; then git -C "apps/$name" fetch --unshallow "$remote" || exit 1; fi; \
+    if ! git -C "apps/$name" cat-file -e "${sha}^{commit}" 2>/dev/null; then \
+      if git -C "apps/$name" rev-parse --is-shallow-repository | grep -q true; then git -C "apps/$name" fetch --unshallow "$remote" || exit 1; fi; \
+    fi; \
     git -C "apps/$name" cat-file -e "${sha}^{commit}" || exit 1; \
     git -C "apps/$name" checkout --detach "$sha" || exit 1; \
     test "$(git -C "apps/$name" rev-parse HEAD)" = "$sha" || { echo "$name SHA mismatch"; exit 1; }; \
